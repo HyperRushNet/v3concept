@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Platformer Editor - Full</title>
+<title>Platformer Editor - Fixed Drag</title>
 <style>
 body { margin:0; overflow:hidden; background:#87CEEB; user-select:none; font-family:monospace; }
 canvas { display:block; background:#87CEEB; cursor:crosshair; }
@@ -24,9 +24,9 @@ canvas { display:block; background:#87CEEB; cursor:crosshair; }
       <li>M + klik = bewegend platform toevoegen.</li>
       <li>Rechtermuisklik = platform verwijderen.</li>
       <li>Slepen = verplaats platform/player.</li>
-      <li>Resize handle (rood vierkant) = platform resizen.</li>
+      <li>Resize handle (rood) = platform resizen.</li>
       <li>Shift + drag = camera bewegen.</li>
-      <li>Bewegende platforms hebben blauwe lijn en pijltjes = begin/eind. Sleep ze om aan te passen.</li>
+      <li>Bewegende platforms hebben blauwe lijn + pijltjes = begin/eind. Sleep ze om aan te passen.</li>
       <li>Snelheid slider = snelheid van geselecteerd bewegend platform.</li>
     </ul>
   </div>
@@ -50,6 +50,7 @@ const handleSize=10;
 let selectedMovingPlatform=null;
 let selectedLineHandle=null;
 let isMKey=false;
+let isDragging=false; // <-- flag
 
 // Camera
 let cam={x:0,y:0};
@@ -59,14 +60,13 @@ const guideToggle=document.getElementById("guideToggle");
 const guide=document.getElementById("guide");
 guideToggle.addEventListener("click", ()=>{ guide.style.display=(guide.style.display==='none')?'block':'none'; });
 
-// Draw
+// Draw function
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // player
   ctx.fillStyle="green";
   ctx.fillRect(playerStart.x-cam.x-15, playerStart.y-cam.y-15,30,30);
 
-  // static
+  // Static platforms
   platforms.forEach(p=>{
     ctx.fillStyle="#654321";
     ctx.fillRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
@@ -75,26 +75,24 @@ function draw(){
     ctx.fillRect(p.x-cam.x+p.w/2-handleSize,p.y-cam.y+p.h/2-handleSize,handleSize,handleSize);
   });
 
-  // moving
+  // Moving platforms
   movingPlatforms.forEach(p=>{
     ctx.fillStyle="orange";
     ctx.fillRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
     ctx.strokeStyle="#FF8C00"; ctx.strokeRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
-    ctx.fillStyle="red"; ctx.fillRect(p.x-cam.x+p.w/2-handleSize,p.y-cam.y+p.h/2-handleSize,handleSize,handleSize);
+    ctx.fillStyle="red";
+    ctx.fillRect(p.x-cam.x+p.w/2-handleSize,p.y-cam.y+p.h/2-handleSize,handleSize,handleSize);
 
     // movement line
     if(p.moveAxis==='x'){
       ctx.strokeStyle="blue"; ctx.lineWidth=2;
-      ctx.beginPath();
-      ctx.moveTo(p.startX-cam.x, p.y-cam.y); ctx.lineTo(p.endX-cam.x, p.y-cam.y); ctx.stroke();
-      // handles
+      ctx.beginPath(); ctx.moveTo(p.startX-cam.x, p.y-cam.y); ctx.lineTo(p.endX-cam.x, p.y-cam.y); ctx.stroke();
       ctx.fillStyle="blue";
       ctx.fillRect(p.startX-cam.x-5,p.y-cam.y-5,10,10);
       ctx.fillRect(p.endX-cam.x-5,p.y-cam.y-5,10,10);
     } else {
       ctx.strokeStyle="blue"; ctx.lineWidth=2;
-      ctx.beginPath();
-      ctx.moveTo(p.x-cam.x,p.startY-cam.y); ctx.lineTo(p.x-cam.x,p.endY-cam.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.x-cam.x,p.startY-cam.y); ctx.lineTo(p.x-cam.x,p.endY-cam.y); ctx.stroke();
       ctx.fillStyle="blue";
       ctx.fillRect(p.x-cam.x-5,p.startY-cam.y-5,10,10);
       ctx.fillRect(p.x-cam.x-5,p.endY-cam.y-5,10,10);
@@ -118,28 +116,25 @@ function getMousePos(e){
 document.addEventListener("keydown", e=>{ if(e.key==="m") isMKey=true; });
 document.addEventListener("keyup", e=>{ if(e.key==="m") isMKey=false; });
 
-// Dragging/resizing
+// Mouse events
 canvas.addEventListener("mousedown", e=>{
+  isDragging=false; // reset
   const pos=getMousePos(e);
-  // player
   if(pos.x>playerStart.x-15 && pos.x<playerStart.x+15 && pos.y>playerStart.y-15 && pos.y<playerStart.y+15){
     dragging="player"; offset={x:pos.x-playerStart.x,y:pos.y-playerStart.y}; return;
   }
   const allPlatforms=[...platforms,...movingPlatforms];
   for(let i=allPlatforms.length-1;i>=0;i--){
     const p=allPlatforms[i];
-    // resize handle
     if(pos.x>p.x+p.w/2-handleSize && pos.x<p.x+p.w/2 && pos.y>p.y+p.h/2-handleSize && pos.y<p.y+p.h/2){
       dragging=p; resizing=true; offset={x:p.x+p.w/2-pos.x, y:p.y+p.h/2-pos.y}; 
       if(movingPlatforms.includes(p)) selectedMovingPlatform=p; return;
     }
-    // drag platform
     if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){
       dragging=p; resizing=false; offset={x:pos.x-p.x, y:pos.y-p.y};
       if(movingPlatforms.includes(p)) selectedMovingPlatform=p; return;
     }
   }
-  // check movement handles for moving platforms
   movingPlatforms.forEach(p=>{
     if(p.moveAxis==='x'){
       if(pos.x>p.startX-5 && pos.x<p.startX+5 && pos.y>p.y-5 && pos.y<p.y+5){ selectedLineHandle='start'; dragging=p; return; }
@@ -154,6 +149,7 @@ canvas.addEventListener("mousedown", e=>{
 canvas.addEventListener("mousemove", e=>{
   const pos=getMousePos(e);
   if(dragging){
+    isDragging=true;
     if(dragging==="player"){ playerStart.x=pos.x-offset.x; playerStart.y=pos.y-offset.y; }
     else if(resizing){ dragging.w=pos.x-(dragging.x-dragging.w/2)+offset.x; dragging.h=pos.y-(dragging.y-dragging.h/2)+offset.y; if(dragging.w<10) dragging.w=10; if(dragging.h<10) dragging.h=10; }
     else if(selectedLineHandle){
@@ -166,27 +162,26 @@ canvas.addEventListener("mousemove", e=>{
 
 canvas.addEventListener("mouseup", e=>{ dragging=null; resizing=false; selectedLineHandle=null; selectedMovingPlatform=null; });
 
-// Left click = add static
+// Add platforms (only if not dragging)
 canvas.addEventListener("click", e=>{
+  if(isDragging) return; // <--- FIX: ignore click if we just dragged
   const pos=getMousePos(e);
   if(isMKey){
-    // moving platform
     movingPlatforms.push({x:pos.x,y:pos.y,w:100,h:20,moveAxis:'y',moveRange:50,speed:0.02,originalX:pos.x,originalY:pos.y,startX:pos.x,endX:pos.x,startY:pos.y,endY:pos.y});
   } else {
-    // static
     platforms.push({x:pos.x,y:pos.y,w:100,h:20});
   }
   draw();
 });
 
-// Right click remove
+// Remove
 canvas.addEventListener("contextmenu", e=>{
   e.preventDefault(); const pos=getMousePos(e);
   for(let i=platforms.length-1;i>=0;i--){ const p=platforms[i]; if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){ platforms.splice(i,1); draw(); return; } }
   for(let i=movingPlatforms.length-1;i>=0;i--){ const p=movingPlatforms[i]; if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){ movingPlatforms.splice(i,1); draw(); return; } }
 });
 
-// slider
+// speed slider
 document.getElementById("speedSlider").addEventListener("input", e=>{ if(selectedMovingPlatform) selectedMovingPlatform.speed=parseFloat(e.target.value); draw(); });
 
 window.addEventListener("resize", ()=>{ canvas.width=window.innerWidth; canvas.height=window.innerHeight; draw(); });

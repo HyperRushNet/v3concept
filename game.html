@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Platformer Physics - GIF Textuur</title>
+    <title>2D Platformer Physics - Stenen Patroon</title>
     <style>
         body { margin:0; overflow:hidden; background:#87CEEB; }
         canvas { display:block; background:#87CEEB; }
@@ -35,30 +35,59 @@ const render = Render.create({
 Render.run(render);
 Runner.run(Runner.create(), engine);
 
+// Functie om een stenen patroon te maken
+function createStonePattern() {
+    const patternCanvas = document.createElement('canvas');
+    const patternContext = patternCanvas.getContext('2d');
+    patternCanvas.width = 40;
+    patternCanvas.height = 40;
+    
+    // Achtergrond kleur
+    patternContext.fillStyle = '#654321';
+    patternContext.fillRect(0, 0, 40, 40);
+    
+    // Lichte stenen
+    patternContext.fillStyle = '#7B6E59';
+    patternContext.fillRect(2, 2, 36, 16);
+    patternContext.fillRect(2, 22, 16, 16);
+    patternContext.fillRect(22, 22, 16, 16);
+
+    // Donkere lijnen
+    patternContext.strokeStyle = '#382D1B';
+    patternContext.lineWidth = 1;
+    patternContext.strokeRect(2, 2, 36, 16);
+    patternContext.strokeRect(2, 22, 16, 16);
+    patternContext.strokeRect(22, 22, 16, 16);
+
+    return render.context.createPattern(patternCanvas, 'repeat');
+}
+
+const stonePattern = createStonePattern();
+
 // Platforms & ground
 const ground = Bodies.rectangle(width/2, height-50, width, 100, { 
     isStatic: true, 
     render:{ 
-        sprite: { texture: 'https://placehold.co/' + width + 'x100/654321/FFFFFF/PNG' }
+        fillStyle: stonePattern
     } 
 });
 const platforms = [
     Bodies.rectangle(400, 400, 300, 20, { 
         isStatic:true, 
         render:{ 
-            sprite: { texture: 'https://placehold.co/300x20/654321/FFFFFF/PNG' }
+            fillStyle: stonePattern
         } 
     }),
     Bodies.rectangle(700, 300, 200, 20, { 
         isStatic:true, 
         render:{ 
-            sprite: { texture: 'https://placehold.co/200x20/654321/FFFFFF/PNG' }
+            fillStyle: stonePattern
         } 
     }),
     Bodies.rectangle(1000, 500, 250, 20, { 
         isStatic:true, 
         render:{ 
-            sprite: { texture: 'https://placehold.co/250x20/654321/FFFFFF/PNG' }
+            fillStyle: stonePattern
         } 
     })
 ];
@@ -72,8 +101,8 @@ const player = Bodies.rectangle(100, 200, 50, 50, {
     render: { 
         sprite: { 
             texture: 'https://threejs.org/examples/textures/crate.gif',
-            xScale: 0.2, // Pas de breedte aan
-            yScale: 0.2  // Pas de hoogte aan
+            xScale: 0.2,
+            yScale: 0.2
         }
     }
 });

@@ -5,13 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Platformer Editor - Fixed Drag</title>
 <style>
-body { margin:0; overflow:hidden; background:#87CEEB; user-select:none; font-family:monospace; }
-canvas { display:block; background:#87CEEB; cursor:crosshair; }
-#jsonOutput { position:fixed; bottom:10px; left:10px; width:95%; height:120px; font-family:monospace; }
-#controls { position:fixed; top:10px; left:10px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; width:220px; }
-#controls label { display:block; margin:5px 0; }
-#guideToggle { cursor:pointer; color:blue; text-decoration:underline; margin-bottom:5px; }
-#guide { display:none; background:#fff; padding:5px; border-radius:5px; margin-bottom:5px; font-size:12px; }
+body { margin: 0; overflow: hidden; background: #87CEEB; user-select: none; font-family: monospace; }
+canvas { display: block; background: #87CEEB; cursor: crosshair; }
+#jsonOutput { position: fixed; bottom: 10px; left: 10px; width: 95%; height: 120px; font-family: monospace; }
+#controls { position: fixed; top: 10px; left: 10px; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; width: 250px; }
+#controls label { display: block; margin: 5px 0; }
+#guideToggle { cursor: pointer; color: blue; text-decoration: underline; margin-bottom: 5px; }
+#guide { display: none; background: #fff; padding: 5px; border-radius: 5px; margin-bottom: 5px; font-size: 12px; }
+.selected { outline: 2px solid yellow; }
+.feedback { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; display: none; }
 </style>
 </head>
 <body>
@@ -28,163 +30,440 @@ canvas { display:block; background:#87CEEB; cursor:crosshair; }
       <li>Shift + drag = camera bewegen.</li>
       <li>Bewegende platforms hebben blauwe lijn + pijltjes = begin/eind. Sleep ze om aan te passen.</li>
       <li>Snelheid slider = snelheid van geselecteerd bewegend platform.</li>
+      <li>Z = undo, Shift + Z = redo.</li>
+      <li>Grid snapping: Aan/Uit met toggle.</li>
     </ul>
   </div>
   <label>Snelheid: <input type="range" id="speedSlider" min="0.005" max="0.1" step="0.005" value="0.02"></label>
+  <label>Platform Breedte: <input type="number" id="platformWidth" value="100"></label>
+  <label>Platform Hoogte: <input type="number" id="platformHeight" value="20"></label>
+  <label>Move Range: <input type="number" id="moveRange" value="50"></label>
+  <label>Move Axis: <select id="moveAxis"><option value="y">Y</option><option value="x">X</option></select></label>
+  <label>Grid Snapping: <input type="checkbox" id="gridSnap" checked> (20px)</label>
 </div>
 <textarea id="jsonOutput" readonly></textarea>
+<div id="feedback" class="feedback"></div>
 <script>
-const canvas=document.getElementById("editorCanvas");
-const ctx=canvas.getContext("2d");
-canvas.width=window.innerWidth;
-canvas.height=window.innerHeight;
+// Configuration object
+const CONFIG = {
+  gridSize: 20,
+  platform: {
+    defaultWidth: 100,
+    defaultHeight: 20,
+    defaultMoveRange: 50,
+    defaultSpeed: 0.02
+  },
+  colors: {
+    player: 'green',
+    staticPlatform: '#654321',
+    movingPlatform: 'orange',
+    resizeHandle: 'red',
+    moveLine: 'blue'
+  }
+};
 
-let platforms=[];
-let movingPlatforms=[];
-let playerStart={x:0,y:0};
+const canvas = document.getElementById("editorCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-let dragging=null;
-let resizing=false;
-let offset={x:0,y:0};
-const handleSize=10;
-let selectedMovingPlatform=null;
-let selectedLineHandle=null;
-let isMKey=false;
-let isDragging=false; // <-- flag
+let platforms = [];
+let movingPlatforms = [];
+let playerStart = { x: 0, y: 0 };
+let history = [];
+let historyIndex = -1;
 
-// Camera
-let cam={x:0,y:0};
+let dragging = null;
+let resizing = false;
+let offset = { x: 0, y: 0 };
+const handleSize = 10;
+let selectedMovingPlatform = null;
+let selectedLineHandle = null;
+let isMKey = false;
+let isDragging = false;
+let cam = { x: 0, y: 0 };
 
-// Guide toggle
-const guideToggle=document.getElementById("guideToggle");
-const guide=document.getElementById("guide");
-guideToggle.addEventListener("click", ()=>{ guide.style.display=(guide.style.display==='none')?'block':'none'; });
+function saveHistory() {
+  history = history.slice(0, historyIndex + 1);
+  history.push({
+    platforms: JSON.parse(JSON.stringify(platforms)),
+    movingPlatforms: JSON.parse(JSON.stringify(movingPlatforms)),
+    playerStart: { ...playerStart }
+  });
+  historyIndex++;
+  if (history.length > 50) history.shift();
+}
 
-// Draw function
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle="green";
-  ctx.fillRect(playerStart.x-cam.x-15, playerStart.y-cam.y-15,30,30);
+function undo() {
+  if (historyIndex > 0) {
+    historyIndex--;
+    const state = history[historyIndex];
+    platforms = JSON.parse(JSON.stringify(state.platforms));
+    movingPlatforms = JSON.parse(JSON.stringify(state.movingPlatforms));
+    playerStart = { ...state.playerStart };
+    draw();
+    showFeedback('Undo');
+  }
+}
 
-  // Static platforms
-  platforms.forEach(p=>{
-    ctx.fillStyle="#654321";
-    ctx.fillRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
-    ctx.strokeStyle="#382D1B"; ctx.strokeRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
-    ctx.fillStyle="red";
-    ctx.fillRect(p.x-cam.x+p.w/2-handleSize,p.y-cam.y+p.h/2-handleSize,handleSize,handleSize);
+function redo() {
+  if (historyIndex < history.length - 1) {
+    historyIndex++;
+    const state = history[historyIndex];
+    platforms = JSON.parse(JSON.stringify(state.platforms));
+    movingPlatforms = JSON.parse(JSON.stringify(state.movingPlatforms));
+    playerStart = { ...state.playerStart };
+    draw();
+    showFeedback('Redo');
+  }
+}
+
+function showFeedback(message) {
+  const feedback = document.getElementById('feedback');
+  feedback.textContent = message;
+  feedback.style.display = 'block';
+  setTimeout(() => feedback.style.display = 'none', 1000);
+}
+
+function snapToGrid(value) {
+  if (document.getElementById('gridSnap').checked) {
+    return Math.round(value / CONFIG.gridSize) * CONFIG.gridSize;
+  }
+  return value;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw grid if snapping enabled
+  if (document.getElementById('gridSnap').checked) {
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 0.5;
+    // Ensure grid aligns with world coordinates (0, 0)
+    const startX = Math.floor(-cam.x / CONFIG.gridSize) * CONFIG.gridSize;
+    const startY = Math.floor(-cam.y / CONFIG.gridSize) * CONFIG.gridSize;
+    for (let x = startX; x <= canvas.width - cam.x; x += CONFIG.gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x + cam.x, 0);
+      ctx.lineTo(x + cam.x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = startY; y <= canvas.height - cam.y; y += CONFIG.gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + cam.y);
+      ctx.lineTo(canvas.width, y + cam.y);
+      ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = CONFIG.colors.player;
+  ctx.fillRect(playerStart.x - cam.x - 15, playerStart.y - cam.y - 15, 30, 30);
+
+  platforms.forEach(p => {
+    ctx.fillStyle = CONFIG.colors.staticPlatform;
+    ctx.fillRect(p.x - cam.x - p.w / 2, p.y - cam.y - p.h / 2, p.w, p.h);
+    ctx.strokeStyle = '#382D1B';
+    ctx.strokeRect(p.x - cam.x - p.w / 2, p.y - cam.y - p.h / 2, p.w, p.h);
+    ctx.fillStyle = CONFIG.colors.resizeHandle;
+    ctx.fillRect(p.x - cam.x + p.w / 2 - handleSize, p.y - cam.y + p.h / 2 - handleSize, handleSize, handleSize);
   });
 
-  // Moving platforms
-  movingPlatforms.forEach(p=>{
-    ctx.fillStyle="orange";
-    ctx.fillRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
-    ctx.strokeStyle="#FF8C00"; ctx.strokeRect(p.x-cam.x-p.w/2,p.y-cam.y-p.h/2,p.w,p.h);
-    ctx.fillStyle="red";
-    ctx.fillRect(p.x-cam.x+p.w/2-handleSize,p.y-cam.y+p.h/2-handleSize,handleSize,handleSize);
+  movingPlatforms.forEach(p => {
+    ctx.fillStyle = CONFIG.colors.movingPlatform;
+    if (p === selectedMovingPlatform) ctx.strokeStyle = 'yellow';
+    ctx.fillRect(p.x - cam.x - p.w / 2, p.y - cam.y - p.h / 2, p.w, p.h);
+    ctx.strokeStyle = p === selectedMovingPlatform ? 'yellow' : '#FF8C00';
+    ctx.strokeRect(p.x - cam.x - p.w / 2, p.y - cam.y - p.h / 2, p.w, p.h);
+    ctx.fillStyle = CONFIG.colors.resizeHandle;
+    ctx.fillRect(p.x - cam.x + p.w / 2 - handleSize, p.y - cam.y + p.h / 2 - handleSize, handleSize, handleSize);
 
-    // movement line
-    if(p.moveAxis==='x'){
-      ctx.strokeStyle="blue"; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.moveTo(p.startX-cam.x, p.y-cam.y); ctx.lineTo(p.endX-cam.x, p.y-cam.y); ctx.stroke();
-      ctx.fillStyle="blue";
-      ctx.fillRect(p.startX-cam.x-5,p.y-cam.y-5,10,10);
-      ctx.fillRect(p.endX-cam.x-5,p.y-cam.y-5,10,10);
+    ctx.strokeStyle = CONFIG.colors.moveLine;
+    ctx.lineWidth = 2;
+    if (p.moveAxis === 'x') {
+      ctx.beginPath();
+      ctx.moveTo(p.startX - cam.x, p.y - cam.y);
+      ctx.lineTo(p.endX - cam.x, p.y - cam.y);
+      ctx.stroke();
+      ctx.fillStyle = CONFIG.colors.moveLine;
+      ctx.fillRect(p.startX - cam.x - 5, p.y - cam.y - 5, 10, 10);
+      ctx.fillRect(p.endX - cam.x - 5, p.y - cam.y - 5, 10, 10);
     } else {
-      ctx.strokeStyle="blue"; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.moveTo(p.x-cam.x,p.startY-cam.y); ctx.lineTo(p.x-cam.x,p.endY-cam.y); ctx.stroke();
-      ctx.fillStyle="blue";
-      ctx.fillRect(p.x-cam.x-5,p.startY-cam.y-5,10,10);
-      ctx.fillRect(p.x-cam.x-5,p.endY-cam.y-5,10,10);
+      ctx.beginPath();
+      ctx.moveTo(p.x - cam.x, p.startY - cam.y);
+      ctx.lineTo(p.x - cam.x, p.endY - cam.y);
+      ctx.stroke();
+      ctx.fillStyle = CONFIG.colors.moveLine;
+      ctx.fillRect(p.x - cam.x - 5, p.startY - cam.y - 5, 10, 10);
+      ctx.fillRect(p.x - cam.x - 5, p.endY - cam.y - 5, 10, 10);
     }
   });
 
   updateJSON();
 }
 
-function updateJSON(){
-  const json={playerStart:{x:playerStart.x,y:playerStart.y},platforms:platforms,movingPlatforms:movingPlatforms};
-  document.getElementById("jsonOutput").value=JSON.stringify(json,null,2);
+function updateJSON() {
+  const json = {
+    playerStart: { x: playerStart.x, y: playerStart.y },
+    platforms: platforms.map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h })),
+    movingPlatforms: movingPlatforms.map(p => ({
+      x: p.x,
+      y: p.y,
+      w: p.w,
+      h: p.h,
+      moveRange: p.moveRange,
+      moveAxis: p.moveAxis,
+      speed: p.speed
+    }))
+  };
+  document.getElementById("jsonOutput").value = JSON.stringify(json, null, 2);
 }
 
-function getMousePos(e){
-  const rect=canvas.getBoundingClientRect();
-  return {x:e.clientX-rect.left+cam.x, y:e.clientY-rect.top+cam.y};
+function getMousePos(e) {
+  const rect = canvas.getBoundingClientRect();
+  let x = e.clientX - rect.left + cam.x;
+  let y = e.clientY - rect.top + cam.y;
+  return {
+    x: snapToGrid(x),
+    y: snapToGrid(y)
+  };
 }
 
-// key M
-document.addEventListener("keydown", e=>{ if(e.key==="m") isMKey=true; });
-document.addEventListener("keyup", e=>{ if(e.key==="m") isMKey=false; });
+document.addEventListener("keydown", e => {
+  if (e.key === "m") isMKey = true;
+  if (e.key === "z" && !e.shiftKey) undo();
+  if (e.key === "Z" && e.shiftKey) redo();
+});
+document.addEventListener("keyup", e => {
+  if (e.key === "m") isMKey = false;
+});
 
-// Mouse events
-canvas.addEventListener("mousedown", e=>{
-  isDragging=false; // reset
-  const pos=getMousePos(e);
-  if(pos.x>playerStart.x-15 && pos.x<playerStart.x+15 && pos.y>playerStart.y-15 && pos.y<playerStart.y+15){
-    dragging="player"; offset={x:pos.x-playerStart.x,y:pos.y-playerStart.y}; return;
+canvas.addEventListener("mousedown", e => {
+  isDragging = false;
+  const pos = getMousePos(e);
+  if (pos.x > playerStart.x - 15 && pos.x < playerStart.x + 15 && pos.y > playerStart.y - 15 && pos.y < playerStart.y + 15) {
+    dragging = "player";
+    offset = { x: pos.x - playerStart.x, y: pos.y - playerStart.y };
+    return;
   }
-  const allPlatforms=[...platforms,...movingPlatforms];
-  for(let i=allPlatforms.length-1;i>=0;i--){
-    const p=allPlatforms[i];
-    if(pos.x>p.x+p.w/2-handleSize && pos.x<p.x+p.w/2 && pos.y>p.y+p.h/2-handleSize && pos.y<p.y+p.h/2){
-      dragging=p; resizing=true; offset={x:p.x+p.w/2-pos.x, y:p.y+p.h/2-pos.y}; 
-      if(movingPlatforms.includes(p)) selectedMovingPlatform=p; return;
+  const allPlatforms = [...platforms, ...movingPlatforms];
+  for (let i = allPlatforms.length - 1; i >= 0; i--) {
+    const p = allPlatforms[i];
+    if (pos.x >= p.x + p.w / 2 - handleSize && pos.x <= p.x + p.w / 2 && pos.y >= p.y + p.h / 2 - handleSize && pos.y <= p.y + p.h / 2) {
+      dragging = p;
+      resizing = true;
+      // Offset from mouse to bottom-right corner
+      offset = { x: pos.x - (p.x + p.w / 2), y: pos.y - (p.y + p.h / 2) };
+      if (movingPlatforms.includes(p)) {
+        selectedMovingPlatform = p;
+        document.getElementById('speedSlider').value = p.speed;
+        document.getElementById('moveRange').value = p.moveRange;
+        document.getElementById('moveAxis').value = p.moveAxis;
+      }
+      return;
     }
-    if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){
-      dragging=p; resizing=false; offset={x:pos.x-p.x, y:pos.y-p.y};
-      if(movingPlatforms.includes(p)) selectedMovingPlatform=p; return;
+    if (pos.x > p.x - p.w / 2 && pos.x < p.x + p.w / 2 && pos.y > p.y - p.h / 2 && pos.y < p.y + p.h / 2) {
+      dragging = p;
+      resizing = false;
+      offset = { x: pos.x - p.x, y: pos.y - p.y };
+      if (movingPlatforms.includes(p)) {
+        selectedMovingPlatform = p;
+        document.getElementById('speedSlider').value = p.speed;
+        document.getElementById('moveRange').value = p.moveRange;
+        document.getElementById('moveAxis').value = p.moveAxis;
+      }
+      return;
     }
   }
-  movingPlatforms.forEach(p=>{
-    if(p.moveAxis==='x'){
-      if(pos.x>p.startX-5 && pos.x<p.startX+5 && pos.y>p.y-5 && pos.y<p.y+5){ selectedLineHandle='start'; dragging=p; return; }
-      if(pos.x>p.endX-5 && pos.x<p.endX+5 && pos.y>p.y-5 && pos.y<p.y+5){ selectedLineHandle='end'; dragging=p; return; }
+  movingPlatforms.forEach(p => {
+    if (p.moveAxis === 'x') {
+      if (pos.x > p.startX - 5 && pos.x < p.startX + 5 && pos.y > p.y - 5 && pos.y < p.y + 5) {
+        selectedLineHandle = 'start';
+        dragging = p;
+        selectedMovingPlatform = p;
+        return;
+      }
+      if (pos.x > p.endX - 5 && pos.x < p.endX + 5 && pos.y > p.y - 5 && pos.y < p.y + 5) {
+        selectedLineHandle = 'end';
+        dragging = p;
+        selectedMovingPlatform = p;
+        return;
+      }
     } else {
-      if(pos.y>p.startY-5 && pos.y<p.startY+5 && pos.x>p.x-5 && pos.x<p.x+5){ selectedLineHandle='start'; dragging=p; return; }
-      if(pos.y>p.endY-5 && pos.y<p.endY+5 && pos.x>p.x-5 && pos.x<p.x+5){ selectedLineHandle='end'; dragging=p; return; }
+      if (pos.y > p.startY - 5 && pos.y < p.startY + 5 && pos.x > p.x - 5 && pos.x < p.x + 5) {
+        selectedLineHandle = 'start';
+        dragging = p;
+        selectedMovingPlatform = p;
+        return;
+      }
+      if (pos.y > p.endY - 5 && pos.y < p.endY + 5 && pos.x > p.x - 5 && pos.x < p.x + 5) {
+        selectedLineHandle = 'end';
+        dragging = p;
+        selectedMovingPlatform = p;
+        return;
+      }
     }
   });
 });
 
-canvas.addEventListener("mousemove", e=>{
-  const pos=getMousePos(e);
-  if(dragging){
-    isDragging=true;
-    if(dragging==="player"){ playerStart.x=pos.x-offset.x; playerStart.y=pos.y-offset.y; }
-    else if(resizing){ dragging.w=pos.x-(dragging.x-dragging.w/2)+offset.x; dragging.h=pos.y-(dragging.y-dragging.h/2)+offset.y; if(dragging.w<10) dragging.w=10; if(dragging.h<10) dragging.h=10; }
-    else if(selectedLineHandle){
-      if(dragging.moveAxis==='x'){ if(selectedLineHandle==='start') dragging.startX=pos.x; else dragging.endX=pos.x; }
-      else { if(selectedLineHandle==='start') dragging.startY=pos.y; else dragging.endY=pos.y; }
-    } else { dragging.x=pos.x-offset.x; dragging.y=pos.y-offset.y; }
+canvas.addEventListener("mousemove", e => {
+  const pos = getMousePos(e);
+  if (dragging) {
+    isDragging = true;
+    if (dragging === "player") {
+      playerStart.x = pos.x - offset.x;
+      playerStart.y = pos.y - offset.y;
+    } else if (resizing) {
+      // Calculate new width and height, keeping top-left corner fixed
+      const newWidth = snapToGrid(pos.x - offset.x - (dragging.x - dragging.w / 2));
+      const newHeight = snapToGrid(pos.y - offset.y - (dragging.y - dragging.h / 2));
+      dragging.w = Math.max(10, newWidth);
+      dragging.h = Math.max(10, newHeight);
+    } else if (selectedLineHandle) {
+      if (dragging.moveAxis === 'x') {
+        if (selectedLineHandle === 'start') dragging.startX = pos.x;
+        else dragging.endX = pos.x;
+        dragging.x = (dragging.startX + dragging.endX) / 2; // Center platform on x-axis
+        dragging.moveRange = Math.abs(dragging.endX - dragging.startX) / 2;
+        document.getElementById('moveRange').value = dragging.moveRange;
+      } else {
+        if (selectedLineHandle === 'start') dragging.startY = pos.y;
+        else dragging.endY = pos.y;
+        dragging.y = (dragging.startY + dragging.endY) / 2; // Center platform on y-axis
+        dragging.moveRange = Math.abs(dragging.endY - dragging.startY) / 2;
+        document.getElementById('moveRange').value = dragging.moveRange;
+      }
+    } else {
+      dragging.x = pos.x - offset.x;
+      dragging.y = pos.y - offset.y;
+      // Update start/end points to keep platform centered
+      if (movingPlatforms.includes(dragging)) {
+        if (dragging.moveAxis === 'x') {
+          dragging.startX = dragging.x - dragging.moveRange;
+          dragging.endX = dragging.x + dragging.moveRange;
+        } else {
+          dragging.startY = dragging.y - dragging.moveRange;
+          dragging.endY = dragging.y + dragging.moveRange;
+        }
+      }
+    }
+    saveHistory();
     draw();
-  } else if(e.shiftKey){ cam.x -= e.movementX; cam.y -= e.movementY; draw(); }
+  } else if (e.shiftKey) {
+    cam.x -= e.movementX;
+    cam.y -= e.movementY;
+    cam.x = Math.max(-1000, Math.min(1000, cam.x));
+    cam.y = Math.max(-1000, Math.min(1000, cam.y));
+    draw();
+  }
 });
 
-canvas.addEventListener("mouseup", e=>{ dragging=null; resizing=false; selectedLineHandle=null; selectedMovingPlatform=null; });
+canvas.addEventListener("mouseup", e => {
+  dragging = null;
+  resizing = false;
+  selectedLineHandle = null;
+});
 
-// Add platforms (only if not dragging)
-canvas.addEventListener("click", e=>{
-  if(isDragging) return; // <--- FIX: ignore click if we just dragged
-  const pos=getMousePos(e);
-  if(isMKey){
-    movingPlatforms.push({x:pos.x,y:pos.y,w:100,h:20,moveAxis:'y',moveRange:50,speed:0.02,originalX:pos.x,originalY:pos.y,startX:pos.x,endX:pos.x,startY:pos.y,endY:pos.y});
+canvas.addEventListener("click", e => {
+  if (isDragging) return;
+  const pos = getMousePos(e);
+  const width = parseFloat(document.getElementById('platformWidth').value) || CONFIG.platform.defaultWidth;
+  const height = parseFloat(document.getElementById('platformHeight').value) || CONFIG.platform.defaultHeight;
+  const moveRange = parseFloat(document.getElementById('moveRange').value) || CONFIG.platform.defaultMoveRange;
+  const moveAxis = document.getElementById('moveAxis').value;
+  if (isMKey) {
+    const newPlatform = {
+      x: pos.x,
+      y: pos.y,
+      w: width,
+      h: height,
+      moveAxis: moveAxis,
+      moveRange: moveRange,
+      speed: parseFloat(document.getElementById('speedSlider').value),
+      startX: pos.x - (moveAxis === 'x' ? moveRange : 0),
+      endX: pos.x + (moveAxis === 'x' ? moveRange : 0),
+      startY: pos.y - (moveAxis === 'y' ? moveRange : 0),
+      endY: pos.y + (moveAxis === 'y' ? moveRange : 0)
+    };
+    movingPlatforms.push(newPlatform);
+    showFeedback('Moving platform added');
   } else {
-    platforms.push({x:pos.x,y:pos.y,w:100,h:20});
+    platforms.push({ x: pos.x, y: pos.y, w: width, h: height });
+    showFeedback('Static platform added');
   }
+  saveHistory();
   draw();
 });
 
-// Remove
-canvas.addEventListener("contextmenu", e=>{
-  e.preventDefault(); const pos=getMousePos(e);
-  for(let i=platforms.length-1;i>=0;i--){ const p=platforms[i]; if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){ platforms.splice(i,1); draw(); return; } }
-  for(let i=movingPlatforms.length-1;i>=0;i--){ const p=movingPlatforms[i]; if(pos.x>p.x-p.w/2 && pos.x<p.x+p.w/2 && pos.y>p.y-p.h/2 && pos.y<p.y+p.h/2){ movingPlatforms.splice(i,1); draw(); return; } }
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  const pos = getMousePos(e);
+  for (let i = platforms.length - 1; i >= 0; i--) {
+    const p = platforms[i];
+    if (pos.x > p.x - p.w / 2 && pos.x < p.x + p.w / 2 && pos.y > p.y - p.h / 2 && pos.y < p.y + p.h / 2) {
+      platforms.splice(i, 1);
+      draw();
+      showFeedback('Static platform removed');
+      saveHistory();
+      return;
+    }
+  }
+  for (let i = movingPlatforms.length - 1; i >= 0; i--) {
+    const p = movingPlatforms[i];
+    if (pos.x > p.x - p.w / 2 && pos.x < p.x + p.w / 2 && pos.y > p.y - p.h / 2 && pos.y < p.y + p.h / 2) {
+      movingPlatforms.splice(i, 1);
+      draw();
+      showFeedback('Moving platform removed');
+      saveHistory();
+      return;
+    }
+  }
 });
 
-// speed slider
-document.getElementById("speedSlider").addEventListener("input", e=>{ if(selectedMovingPlatform) selectedMovingPlatform.speed=parseFloat(e.target.value); draw(); });
+document.getElementById("speedSlider").addEventListener("input", e => {
+  if (selectedMovingPlatform) {
+    selectedMovingPlatform.speed = parseFloat(e.target.value);
+    draw();
+    showFeedback('Speed updated');
+  }
+});
 
-window.addEventListener("resize", ()=>{ canvas.width=window.innerWidth; canvas.height=window.innerHeight; draw(); });
+document.getElementById("moveRange").addEventListener("input", e => {
+  if (selectedMovingPlatform) {
+    selectedMovingPlatform.moveRange = parseFloat(e.target.value);
+    if (selectedMovingPlatform.moveAxis === 'x') {
+      selectedMovingPlatform.startX = selectedMovingPlatform.x - selectedMovingPlatform.moveRange;
+      selectedMovingPlatform.endX = selectedMovingPlatform.x + selectedMovingPlatform.moveRange;
+    } else {
+      selectedMovingPlatform.startY = selectedMovingPlatform.y - selectedMovingPlatform.moveRange;
+      selectedMovingPlatform.endY = selectedMovingPlatform.y + selectedMovingPlatform.moveRange;
+    }
+    draw();
+    showFeedback('Move range updated');
+  }
+});
+
+document.getElementById("moveAxis").addEventListener("change", e => {
+  if (selectedMovingPlatform) {
+    selectedMovingPlatform.moveAxis = e.target.value;
+    selectedMovingPlatform.startX = selectedMovingPlatform.x;
+    selectedMovingPlatform.endX = selectedMovingPlatform.x + (e.target.value === 'x' ? selectedMovingPlatform.moveRange : 0);
+    selectedMovingPlatform.startY = selectedMovingPlatform.y;
+    selectedMovingPlatform.endY = selectedMovingPlatform.y + (e.target.value === 'y' ? selectedMovingPlatform.moveRange : 0);
+    draw();
+    showFeedback('Move axis updated');
+  }
+});
+
+window.addEventListener("resize", () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  draw();
+});
+
+document.getElementById('guideToggle').addEventListener("click", () => {
+  const guide = document.getElementById('guide');
+  guide.style.display = (guide.style.display === 'none') ? 'block' : 'none';
+});
 
 draw();
 </script>

@@ -1,186 +1,291 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Platformer Physics - Stenen Patroon</title>
-    <style>
-        body { margin:0; overflow:hidden; background:#87CEEB; }
-        canvas { display:block; background:#87CEEB; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platformer Runner - Map Executor</title>
+<style>
+body { margin:0; overflow:hidden; background:#222; font-family:sans-serif; color:white; }
+canvas { display:block; background:#87CEEB; }
+#hud { position:absolute; top:10px; left:10px; background:rgba(0,0,0,0.5); padding:10px; border-radius:8px; }
+.ability { margin-bottom:5px; }
+.ready { color:#0f0; }
+.cooldown { color:#f00; }
+</style>
 </head>
 <body>
+<div id="hud">
+  <div class="ability" id="dash">Dash (Shift): Ready</div>
+  <div class="ability" id="airhop">Air Hop (Space): Ready</div>
+  <div class="ability" id="teleport">Teleport (blauw): Ready</div>
+  <div class="ability" id="sword">Sword (C): Ready</div>
+</div>
+<canvas id="gameCanvas"></canvas>
 <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
 <script>
-const { Engine, Render, Runner, Bodies, World, Body, Events, Composite, Query } = Matter;
+// --- MAP DATA ---
+const mapData = {
+  "playerStart": {
+    "x": 50,
+    "y": 20
+  },
+  "platforms": [
+    { "x": 0, "y": 200, "w": 400, "h": 20 },
+    { "x": 300, "y": 100, "w": 100, "h": 20 },
+    { "x": 600, "y": 100, "w": 100, "h": 20 },
+    { "x": 900, "y": 0, "w": 150, "h": 20 },
+    { "x": 1200, "y": -100, "w": 100, "h": 20 },
+    { "x": 1500, "y": -200, "w": 100, "h": 20 }
+  ],
+  "movingPlatforms": [],
+  "teleporters": [
+    { "id": "teleporter1", "targetId": "teleporter2", "x": 2000, "y": -200, "w": 50, "h": 50 },
+    { "id": "teleporter2", "targetId": "teleporter1", "x": -200, "y": 200, "w": 50, "h": 50 }
+  ]
+};
 
-// Engine setup
+// --- MATTER SETUP ---
+const { Engine, Render, Runner, Bodies, World, Body, Events, Composite, Query } = Matter;
+const canvas = document.getElementById("gameCanvas");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const hud = {
+  dash: document.getElementById('dash'),
+  airhop: document.getElementById('airhop'),
+  teleport: document.getElementById('teleport'),
+  sword: document.getElementById('sword')
+};
+
+// Engine
 const engine = Engine.create();
 engine.world.gravity.y = 1.2;
 const world = engine.world;
 
-// Renderer
-let width = window.innerWidth;
-let height = window.innerHeight;
 const render = Render.create({
-    element: document.body,
-    engine: engine,
-    options: {
-        width,
-        height,
-        wireframes: false,
-        background: '#87CEEB'
-    }
+  canvas: canvas,
+  engine: engine,
+  options: {
+    width: canvas.width,
+    height: canvas.height,
+    wireframes: false,
+    background: '#87CEEB'
+  }
 });
 Render.run(render);
 Runner.run(Runner.create(), engine);
 
-// Functie om een stenen patroon te maken
-function createStonePattern() {
-    const patternCanvas = document.createElement('canvas');
-    const patternContext = patternCanvas.getContext('2d');
-    patternCanvas.width = 40;
-    patternCanvas.height = 40;
-    
-    // Achtergrond kleur
-    patternContext.fillStyle = '#654321';
-    patternContext.fillRect(0, 0, 40, 40);
-    
-    // Lichte stenen
-    patternContext.fillStyle = '#7B6E59';
-    patternContext.fillRect(2, 2, 36, 16);
-    patternContext.fillRect(2, 22, 16, 16);
-    patternContext.fillRect(22, 22, 16, 16);
-
-    // Donkere lijnen
-    patternContext.strokeStyle = '#382D1B';
-    patternContext.lineWidth = 1;
-    patternContext.strokeRect(2, 2, 36, 16);
-    patternContext.strokeRect(2, 22, 16, 16);
-    patternContext.strokeRect(22, 22, 16, 16);
-
-    return render.context.createPattern(patternCanvas, 'repeat');
-}
-
-const stonePattern = createStonePattern();
-
-// Platforms & ground
-const ground = Bodies.rectangle(width/2, height-50, width, 100, { 
-    isStatic: true, 
-    render:{ 
-        fillStyle: stonePattern
-    } 
-});
-const platforms = [
-    Bodies.rectangle(400, 400, 300, 20, { 
-        isStatic:true, 
-        render:{ 
-            fillStyle: stonePattern
-        } 
-    }),
-    Bodies.rectangle(700, 300, 200, 20, { 
-        isStatic:true, 
-        render:{ 
-            fillStyle: stonePattern
-        } 
-    }),
-    Bodies.rectangle(1000, 500, 250, 20, { 
-        isStatic:true, 
-        render:{ 
-            fillStyle: stonePattern
-        } 
-    })
-];
-World.add(world, [ground, ...platforms]);
-
 // Player
-const player = Bodies.rectangle(100, 200, 50, 50, { 
-    restitution: 0.05, 
+const playerOptions = {
+    restitution: 0,
     friction: 0.01,
     frictionAir: 0.02,
-    render: { 
-        sprite: { 
-            texture: 'https://threejs.org/examples/textures/crate.gif',
-            xScale: 0.2,
-            yScale: 0.2
-        }
-    }
-});
+    render: {
+      fillStyle: '#f00'
+    },
+    label: 'player',
+    inertia: Infinity,
+    angle: 0
+};
+const player = Bodies.rectangle(mapData.playerStart.x, mapData.playerStart.y, 50, 50, playerOptions);
 World.add(world, player);
 
+// Platforms
+mapData.platforms.forEach(p => {
+  World.add(world, Bodies.rectangle(p.x, p.y, p.w, p.h, { isStatic: true, render: { fillStyle: '#654321' }, label: 'static-platform' }));
+});
+
+// Bewegende platforms zijn verwijderd
+const movingPlatforms = [];
+
+// Teleporters
+const teleporters = {};
+mapData.teleporters.forEach(t => {
+  const tp = Bodies.rectangle(t.x, t.y, t.w, t.h, { isStatic: true, isSensor: true, render: { fillStyle: '#00f' }, label: 'teleporter' });
+  tp.id = t.id;
+  tp.targetId = t.targetId;
+  tp.size = { w: t.w, h: t.h };
+  teleporters[t.id] = tp;
+  World.add(world, tp);
+});
+
 // Controls
-const keys = { left:false, right:false, up:false, dash: false };
-let isDashing = false;
-let dashStartTime = 0;
-let lastDashTime = 0;
-const dashCooldown = 2000;
-const dashDuration = 100;
+const keys = { left: false, right: false, up: false, dash: false, hop: false };
+let activeSword = null;
+let lastDash = 0, dashDuration = 100, dashCooldown = 2000, isDashing = false;
+let lastHop = 0, hopCooldown = 1500;
+let lastTeleport = 0, teleportCooldown = 2000;
 
 document.addEventListener('keydown', e => {
-    if(e.code==='ArrowLeft') keys.left=true;
-    if(e.code==='ArrowRight') keys.right=true;
-    if(e.code==='ArrowUp') keys.up=true;
-    if(e.code==='ShiftLeft' || e.code==='ShiftRight') keys.dash=true;
+  if (e.code === 'ArrowLeft') keys.left = true;
+  if (e.code === 'ArrowRight') keys.right = true;
+  if (e.code === 'ArrowUp') keys.up = true;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.dash = true;
+  if (e.code === 'Space') keys.hop = true;
+  if (e.code === 'KeyC') startSwordSwing();
 });
 document.addEventListener('keyup', e => {
-    if(e.code==='ArrowLeft') keys.left=false;
-    if(e.code==='ArrowRight') keys.right=false;
-    if(e.code==='ArrowUp') keys.up=false;
-    if(e.code==='ShiftLeft' || e.code==='ShiftRight') keys.dash=false;
+  if (e.code === 'ArrowLeft') keys.left = false;
+  if (e.code === 'ArrowRight') keys.right = false;
+  if (e.code === 'ArrowUp') keys.up = false;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.dash = false;
+  if (e.code === 'Space') keys.hop = false;
 });
 
-// Functie om te controleren of de speler de grond raakt
 function isPlayerOnGround() {
-    const checkArea = Bodies.rectangle(player.position.x, player.bounds.max.y + 5, player.bounds.max.x - player.bounds.min.x, 10, { isSensor: true });
-    const collisions = Query.collides(checkArea, Composite.allBodies(world));
-    const onGround = collisions.some(collision => {
-        return (collision.bodyA.isStatic || collision.bodyB.isStatic) && (collision.bodyA !== player && collision.bodyB !== player);
-    });
-    return onGround;
+  const sensor = Bodies.rectangle(player.position.x, player.bounds.max.y + 5, 10, 10, { isSensor: true, isStatic: true });
+  const collisions = Query.collides(sensor, Composite.allBodies(world));
+  World.remove(world, sensor);
+  return collisions.some(c => {
+    const other = (c.bodyA === sensor) ? c.bodyB : c.bodyA;
+    return other.label === 'static-platform' || other.label === 'moving-platform';
+  });
 }
 
-// Game loop
-Events.on(engine, 'beforeUpdate', () => {
-    const speed = 5;
-    const dashSpeed = 15;
-    
-    const canDashNow = Date.now() - lastDashTime >= dashCooldown;
+function startSwordSwing(){
+  if(activeSword) return;
+  const dir = keys.left ? -1 : 1;
+  
+  const handOffsetX = dir * 25;
 
-    if (keys.dash && !isDashing && canDashNow) {
-        let dashDirection = 0;
-        if (keys.left) dashDirection = -dashSpeed;
-        if (keys.right) dashDirection = dashSpeed;
+  // Laad de afbeelding om de ratio te berekenen
+  const swordImg = new Image();
+  swordImg.src = 'https://hyperrushnet.github.io/v3concept/sword-image-game-no-bg.png';
+  swordImg.onload = () => {
+    const originalWidth = swordImg.width;
+    const originalHeight = swordImg.height;
+    const targetHeight = 25; // in-game hoogte in px
+    const scale = targetHeight / originalHeight;
+    const targetWidth = originalWidth * scale;
 
-        if (dashDirection !== 0) {
-            Body.setVelocity(player, { x: dashDirection, y: player.velocity.y });
-            isDashing = true;
-            dashStartTime = Date.now();
-            lastDashTime = Date.now();
+    const sword = Bodies.rectangle(player.position.x + handOffsetX, player.position.y, targetWidth, targetHeight, {
+      isSensor: true,
+      render: {
+        sprite: {
+          texture: swordImg.src,
+          xScale: scale,
+          yScale: scale
         }
-    }
-    
-    if (isDashing && Date.now() - dashStartTime >= dashDuration) {
-        isDashing = false;
-        Body.setVelocity(player, { x: 0, y: player.velocity.y });
-    }
+      },
+      label: 'sword'
+    });
 
-    if (!isDashing) {
-        const currentVelocityX = player.velocity.x;
-        const targetVelocityX = (keys.right ? speed : 0) - (keys.left ? speed : 0);
-        const newVelocityX = currentVelocityX + (targetVelocityX - currentVelocityX) * 0.2;
-        Body.setVelocity(player, { x: newVelocityX, y: player.velocity.y });
-    }
+    sword.dir = dir;
+    sword.handOffsetX = handOffsetX;
 
-    if(keys.up && isPlayerOnGround()) {
-        Body.setVelocity(player, { x: player.velocity.x, y: -15 });
+    activeSword = sword;
+    World.add(world, sword);
+
+    let angle = dir === 1 ? -Math.PI / 4 : -3 * Math.PI / 4;
+    Body.setAngle(sword, angle);
+    const swingDuration = 200;
+    const swingArc = Math.PI / 2;
+    const step = swingArc / (swingDuration / 16) * dir;
+    let elapsed = 0;
+    const interval = setInterval(() => {
+      elapsed += 16;
+      Body.rotate(sword, step);
+      if (elapsed >= swingDuration) {
+        World.remove(world, sword);
+        activeSword = null;
+        clearInterval(interval);
+      }
+    }, 16);
+  };
+}
+
+
+function updateHUD(){
+  const now = Date.now();
+  hud.dash.className = (now - lastDash >= dashCooldown ? 'ready' : 'cooldown');
+  hud.airhop.className = (now - lastHop >= hopCooldown ? 'ready' : 'cooldown');
+  hud.teleport.className = (now - lastTeleport >= teleportCooldown ? 'ready' : 'cooldown');
+  hud.sword.className = 'ready';
+  hud.dash.textContent = `Dash (Shift): ${now - lastDash >= dashCooldown ? 'Ready' : 'Cooldown'}`;
+  hud.airhop.textContent = `Air Hop (Space): ${now - lastHop >= hopCooldown ? 'Ready' : 'Cooldown'}`;
+  hud.teleport.textContent = `Teleport (blauw): ${now - lastTeleport >= teleportCooldown ? 'Ready' : 'Cooldown'}`;
+  hud.sword.textContent = `Sword (C): Ready`;
+}
+
+Events.on(engine, 'beforeUpdate', () => {
+  const now = Date.now();
+  const speed = 5, dashSpeed = 15;
+
+  // Dash
+  const canDashNow = now - lastDash >= dashCooldown;
+  if (keys.dash && !isDashing && canDashNow) {
+    let dashDir = 0;
+    if (keys.left) dashDir = -dashSpeed;
+    if (keys.right) dashDir = dashSpeed;
+    if (dashDir !== 0) {
+      Body.setVelocity(player, { x: dashDir, y: player.velocity.y });
+      isDashing = true;
+      dashStartTime = now;
+      lastDash = now;
     }
+  }
+  if (isDashing && now - dashStartTime >= dashDuration) {
+    isDashing = false;
+    Body.setVelocity(player, { x: 0, y: player.velocity.y });
+  }
+
+  // Air hop
+  if (keys.hop && !isPlayerOnGround() && now - lastHop >= hopCooldown) {
+    Body.setVelocity(player, { x: player.velocity.x, y: -12 });
+    lastHop = now;
+  }
+
+  // Movement
+  if (!isDashing) {
+    const curr = player.velocity.x;
+    const target = (keys.right ? speed : 0) - (keys.left ? speed : 0);
+    Body.setVelocity(player, { x: curr + (target - curr) * 0.2, y: player.velocity.y });
+  }
+  if (keys.up && isPlayerOnGround()) {
+    Body.setVelocity(player, { x: player.velocity.x, y: -15 });
+  }
+
+  // Teleporters
+  Composite.allBodies(world).forEach(body => {
+    if (body.label === 'teleporter') {
+      const collisions = Query.collides(player, [body]);
+      if (collisions.length > 0 && now - lastTeleport > teleportCooldown) {
+        const target = teleporters[body.targetId];
+        if (target) {
+          const newX = target.position.x;
+          const newY = target.position.y - target.size.h / 2 - (player.bounds.max.y - player.bounds.min.y) / 2;
+          Body.setPosition(player, { x: newX, y: newY });
+          Body.setVelocity(player, { x: 0, y: 0 });
+          lastTeleport = now;
+        }
+      }
+    }
+  });
+
+  Body.setAngle(player, 0);
+
+  // Sword follows player
+  if (activeSword) {
+    Body.setPosition(activeSword, {
+      x: player.position.x + activeSword.handOffsetX,
+      y: player.position.y
+    });
+  }
+
+  // Camera
+  const followX = player.position.x - canvas.width / 2;
+  const followY = player.position.y - canvas.height / 2;
+  const camX = render.bounds.min.x + (followX - render.bounds.min.x) * 0.1;
+  const camY = render.bounds.min.y + (followY - render.bounds.min.y) * 0.1;
+  Render.lookAt(render, { min: { x: camX, y: camY }, max: { x: camX + canvas.width, y: camY + canvas.height } });
+
+  updateHUD();
 });
 
-// Responsieve canvas
 window.addEventListener('resize', () => {
-    width = window.innerWidth;
-    height = window.innerHeight;
-    Render.lookAt(render, { min:{x:0,y:0}, max:{x:width, y:height} });
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  Render.lookAt(render, { min: { x: 0, y: 0 }, max: { x: canvas.width, y: canvas.height } });
 });
 </script>
 </body>

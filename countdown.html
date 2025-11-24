@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Countdown to 5 December</title>
+<style>
+    body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(135deg, #2b5876, #4e4376);
+        font-family: "Segoe UI", sans-serif;
+        color: white;
+        text-align: center;
+    }
+
+    .card {
+        background: rgba(255, 255, 255, 0.12);
+        padding: 40px 60px;
+        border-radius: 22px;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        max-width: 450px;
+    }
+
+    .title {
+        font-size: 30px;
+        margin-bottom: 20px;
+        font-weight: 500;
+        line-height: 1.3;
+    }
+
+    #countdown {
+        font-size: 44px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+
+    #special {
+        font-size: 50px;
+        font-weight: bold;
+        color: #ffe082;
+        display: none;
+    }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="title" id="title">Nog ... dagen tot je verjaardag</div>
+    <div id="special">🎉 Het is 5 december!! :)</div>
+    <div id="countdown">Loading...</div>
+</div>
+
+<script>
+// ---------------------------------------------
+// DEBUG FEATURE: override 'now' via console
+// In console: fakeTime = new Date("2025-12-05T10:00:00");
+// To disable: fakeTime = null
+// ---------------------------------------------
+window.fakeTime = null;
+
+function getNow() {
+    return window.fakeTime instanceof Date ? window.fakeTime : new Date();
+}
+
+function updateCountdown() {
+    const now = getNow();
+    const year = now.getFullYear();
+
+    let target = new Date(year, 11, 5, 0, 0, 0);
+
+    if (now > target) {
+        target = new Date(year + 1, 11, 5, 0, 0, 0);
+    }
+
+    const isDec5 = now.getMonth() === 11 && now.getDate() === 5;
+
+    if (isDec5) {
+        document.getElementById("countdown").style.display = "none";
+        document.getElementById("special").style.display = "block";
+        document.getElementById("title").textContent = "Gelukkige verjaardag! ❤️";
+        return;
+    }
+
+    const diff = target - now;
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const mins = Math.floor((diff / (1000 * 60)) % 60);
+    const secs = Math.floor((diff / 1000) % 60);
+
+    document.getElementById("title").textContent =
+        `Nog ${days} dagen tot je verjaardag`;
+
+    document.getElementById("countdown").textContent =
+        `${days}d ${hours}h ${mins}m ${secs}s`;
+}
+
+updateCountdown();
+setInterval(updateCountdown, 1000);
+</script>
+
+</body>
+</html>
